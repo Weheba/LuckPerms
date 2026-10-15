@@ -4,10 +4,22 @@ plugins {
 
 repositories {
     maven { url 'https://repo.papermc.io/repository/maven-public/' }
+    maven {
+        url 'https://maven.pkg.github.com/Weheba/InCore'
+        credentials {
+            username = findProperty('gpr.username') ?: System.getenv('GITHUB_ACTOR')
+            password = findProperty('gpr.token') ?: System.getenv('GITHUB_TOKEN')
+        }
+        content { includeGroup 'net.inpvp' }
+    }
 }
 
 java {
     disableAutoTargetJvm()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 25
 }
 
 dependencies {
@@ -25,6 +37,7 @@ dependencies {
         exclude(module: 'bukkit')
     }
     compileOnly 'lilypad.client.connect:api:0.0.1-SNAPSHOT'
+    compileOnly 'net.inpvp:incore-paper-api:1.1.0-beta-31'
 }
 
 shadowJar {

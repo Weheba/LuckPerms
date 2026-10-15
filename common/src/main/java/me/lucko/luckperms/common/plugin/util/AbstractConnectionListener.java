@@ -33,6 +33,7 @@ import net.luckperms.api.platform.Platform;
 
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -70,8 +71,11 @@ public abstract class AbstractConnectionListener {
         // register with the housekeeper to avoid accidental unloads
         this.plugin.getUserManager().getHouseKeeper().registerUsage(uniqueId);
 
-        // save uuid data.
-        PlayerSaveResult saveResult = this.plugin.getStorage().savePlayerData(uniqueId, username).join();
+        // save uuid data and load the user in parallel.
+        CompletableFuture<PlayerSaveResult> saveFuture = this.plugin.getStorage().savePlayerData(uniqueId, username);
+        CompletableFuture<User> loadFuture = this.plugin.getStorage().loadUser(uniqueId, username);
+
+        PlayerSaveResult saveResult = saveFuture.join();
 
         // fire UserFirstLogin event
         if (saveResult.includes(PlayerSaveResult.Outcome.CLEAN_INSERT)) {
@@ -103,7 +107,7 @@ public abstract class AbstractConnectionListener {
             this.plugin.getLogger().warn("See here for more info: https://luckperms.net/wiki/Network-Installation#pre-setup");
         }
 
-        User user = this.plugin.getStorage().loadUser(uniqueId, username).join();
+        User user = loadFuture.join();
         if (user == null) {
             throw new NullPointerException("User is null");
         }

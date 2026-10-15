@@ -2,6 +2,10 @@ plugins {
     alias(libs.plugins.shadow)
 }
 
+tasks.withType(JavaCompile).configureEach {
+    options.release = 25
+}
+
 dependencies {
     implementation project(':bukkit')
     implementation 'com.google.code.gson:gson:2.7'

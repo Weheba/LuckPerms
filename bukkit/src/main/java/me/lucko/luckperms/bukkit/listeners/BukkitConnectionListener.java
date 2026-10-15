@@ -34,6 +34,7 @@ import me.lucko.luckperms.common.locale.Message;
 import me.lucko.luckperms.common.locale.TranslationManager;
 import me.lucko.luckperms.common.model.User;
 import me.lucko.luckperms.common.plugin.util.AbstractConnectionListener;
+import net.inpvp.incore.paperapi.events.InCoreParallelPlayerPreLoginEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.entity.Player;
@@ -85,66 +86,35 @@ public class BukkitConnectionListener extends AbstractConnectionListener impleme
         this.plugin.getLogger().warn("For more info, please see: https://luckperms.net/wiki/Installation#craftbukkit-and-offline-mode");
     }
 
-    @EventHandler(priority = EventPriority.LOW)
-    public void onPlayerPreLogin(AsyncPlayerPreLoginEvent e) {
-        /* Called when the player first attempts a connection with the server.
-           Listening on LOW priority to allow plugins to modify username / UUID data here. (auth plugins)
-           Also, give other plugins a chance to cancel the event. */
+    @EventHandler
+    public void onPlayerPreLogin(InCoreParallelPlayerPreLoginEvent e) {
+        e.addTask(this.plugin.getLoader(), () -> {
+            try {
+                this.plugin.getBootstrap().getEnableLatch().await(60, TimeUnit.SECONDS);
+            } catch (InterruptedException ex) {
+                ex.printStackTrace();
+            }
 
-        /* wait for the plugin to enable. because these events are fired async, they can be called before
-           the plugin has enabled.  */
-        try {
-            this.plugin.getBootstrap().getEnableLatch().await(60, TimeUnit.SECONDS);
-        } catch (InterruptedException ex) {
-            ex.printStackTrace();
-        }
+            if (this.plugin.getConfiguration().get(ConfigKeys.DEBUG_LOGINS)) {
+                this.plugin.getLogger().info("Processing pre-login for " + e.getPlayerId() + " - " + e.getPlayerName());
+            }
 
-        if (this.plugin.getConfiguration().get(ConfigKeys.DEBUG_LOGINS)) {
-            this.plugin.getLogger().info("Processing pre-login for " + e.getUniqueId() + " - " + e.getName());
-        }
-
-        if (e.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) {
-            // another plugin has disallowed the login.
-            this.plugin.getLogger().info("Another plugin has cancelled the connection for " + e.getUniqueId() + " - " + e.getName() + ". No permissions data will be loaded.");
-            this.deniedAsyncLogin.add(e.getUniqueId());
-            return;
-        }
-
-        /* Actually process the login for the connection.
-           We do this here to delay the login until the data is ready.
-           If the login gets cancelled later on, then this will be cleaned up.
-
-           This includes:
-           - loading uuid data
-           - loading permissions
-           - creating a user instance in the UserManager for this connection.
-           - setting up cached data. */
-        try {
-            User user = loadUser(e.getUniqueId(), e.getName());
-            recordConnection(e.getUniqueId());
-            this.plugin.getEventDispatcher().dispatchPlayerLoginProcess(e.getUniqueId(), e.getName(), user);
-        } catch (Exception ex) {
-            this.plugin.getLogger().severe("Exception occurred whilst loading data for " + e.getUniqueId() + " - " + e.getName(), ex);
-
-            // deny the connection
-            this.deniedAsyncLogin.add(e.getUniqueId());
-
-            Component reason = TranslationManager.render(Message.LOADING_DATABASE_ERROR.build());
-            e.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, LegacyComponentSerializer.legacySection().serialize(reason));
-            this.plugin.getEventDispatcher().dispatchPlayerLoginProcess(e.getUniqueId(), e.getName(), null);
-        }
+            try {
+                User user = loadUser(e.getPlayerId(), e.getPlayerName());
+                recordConnection(e.getPlayerId());
+                this.plugin.getEventDispatcher().dispatchPlayerLoginProcess(e.getPlayerId(), e.getPlayerName(), user);
+                return InCoreParallelPlayerPreLoginEvent.Task.Result.allow();
+            } catch (RuntimeException ex) {
+                this.deniedAsyncLogin.add(e.getPlayerId());
+                this.plugin.getEventDispatcher().dispatchPlayerLoginProcess(e.getPlayerId(), e.getPlayerName(), null);
+                throw ex;
+            }
+        });
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerPreLoginMonitor(AsyncPlayerPreLoginEvent e) {
-        /* Listen to see if the event was cancelled after we initially handled the connection
-           If the connection was cancelled here, we need to do something to clean up the data that was loaded. */
-
-        // Check to see if this connection was denied at LOW.
         if (this.deniedAsyncLogin.remove(e.getUniqueId())) {
-            // their data was never loaded at LOW priority, now check to see if they have been magically allowed since then.
-
-            // This is a problem, as they were denied at low priority, but are now being allowed.
             if (e.getLoginResult() == AsyncPlayerPreLoginEvent.Result.ALLOWED) {
                 this.plugin.getLogger().severe("Player connection was re-allowed for " + e.getUniqueId());
                 e.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, "");

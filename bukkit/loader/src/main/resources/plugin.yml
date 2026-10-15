@@ -23,6 +23,7 @@ loadbefore: [Vault]
 # Soft depend on LilyPad for messaging service impl
 # Soft depend on ViaVersion for adventure protocol facet
 softdepend: [LilyPad-Connect, ViaVersion]
+depend: [InCore]
 
 commands:
   luckperms:
